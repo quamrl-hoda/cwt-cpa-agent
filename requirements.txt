@@ -1,0 +1,20 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
+python-dotenv
+requests
+
+# ── PDF Parsing ───────────────────────────────────────────────────────────────
+docling
+pypdf
+
+# ── Google Drive + Gmail (OAuth2) ─────────────────────────────────────────────
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+
+# ── Apify (Shiply + FBX market rates) ────────────────────────────────────────
+apify-client
+
+# ── Web scraping (FBX fallback) ───────────────────────────────────────────────
+beautifulsoup4
+lxml
