@@ -6,7 +6,7 @@ CPA report with anomaly detection — powered by a Hermes-style tool orchestrato
 
 Built for: **Crowd Wisdom Trading** internship assessment.
 
----
+
 
 ## Architecture — 7 Agents via Hermes Orchestrator
 
@@ -61,7 +61,7 @@ PDF Files (local / GDrive / Gmail)
   outputs/cwt_cpa_report_YYYYMMDD_HHMMSS.html   ← open in browser
 ```
 
----
+
 
 ## Setup
 
@@ -138,7 +138,7 @@ python main.py --list-tools
 python main.py --legacy
 ```
 
----
+
 
 ## Market Rate Sources (Agent 5 — 5-level waterfall)
 
@@ -150,7 +150,7 @@ python main.py --legacy
 | 4 | **FBX REST API** — Freightos Baltic Index public API | Often 403 |
 | 5 | **FBX Static Fallback** — hardcoded Q1-2025 reference rates | Always available |
 
----
+
 
 ## Output Example
 
@@ -188,7 +188,7 @@ python main.py --legacy
   Recommendation 1: Renegotiate the Shanghai→Rotterdam contract...
 ```
 
----
+
 
 ## Project Structure
 
@@ -219,7 +219,7 @@ cwt-cpa-agent/
 └── README.md
 ```
 
----
+
 
 ## Tech Stack
 
