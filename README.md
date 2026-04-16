@@ -155,35 +155,35 @@ python main.py --legacy
 ## Output Example
 
 ```
-╔══════════════════════════════════════════════════════════════════╗
-║          CROWD WISDOM TRADING — CPA Logistics Cost Report        ║
-║          Generated: 20250415_143022                              ║
-╚══════════════════════════════════════════════════════════════════╝
 
-━━━ SECTION 1: Data Ingestion Summary ━━━
+          CROWD WISDOM TRADING — CPA Logistics Cost Report        
+          Generated: 20250415_143022                              
+
+
+ SECTION 1: Data Ingestion Summary 
   Total documents processed : 5
   Successfully saved to DB  : 4
   Duplicates skipped        : 1
   Failed / incomplete       : 0
 
-━━━ SECTION 2: Cost Analytics ━━━
+ SECTION 2: Cost Analytics 
   Overall average cost      : $2,145.00
   Average cost per route:
     Shanghai → Rotterdam        $2,300.00
     Shenzhen → Hamburg          $1,890.00
   Monthly trend: ⬆ increasing
 
-━━━ SECTION 3: Market Rate Comparison (Shiply / FBX / Xeneta) ━━━
+  SECTION 3: Market Rate Comparison (Shiply / FBX / Xeneta) 
   Route                               Your Avg     Market      Diff       %    Source
   Shanghai → Rotterdam               $2,300.00  $1,950.00  +$350.00  +17.9%   FBX Web (FBX03)
   Shenzhen → Hamburg                 $1,890.00  $2,100.00  -$210.00  -10.0%   FBX Static (FBX03)
 
-━━━ SECTION 4: Anomalies (1 found) ━━━
+ SECTION 4: Anomalies (1 found) 
   [1] [MEDIUM] OVERPAYING
       Route  : Shanghai → Rotterdam
       Detail : Paying 17.9% above market on Shanghai → Rotterdam.
 
-━━━ SECTION 5: Executive Summary (AI-Generated) ━━━
+  SECTION 5: Executive Summary (AI-Generated) 
   The overall average shipping cost of $2,145 is marginally above market...
   Recommendation 1: Renegotiate the Shanghai→Rotterdam contract...
 ```
@@ -234,12 +234,3 @@ cwt-cpa-agent/
 | Google Integration | Google Drive API v3 + Gmail API v1 (OAuth2) |
 | Feedback Loop | Hermes prompt-memory (`core/prompt_memory.json`) |
 
----
-
-## Submission
-
-- GitHub: [your repo link]
-- Apify token: [submit in email if using Shiply — not required, system falls back]
-- Output examples: see `outputs/` folder
-
-Submit to: gilad@crowdwisdomtrading.com
