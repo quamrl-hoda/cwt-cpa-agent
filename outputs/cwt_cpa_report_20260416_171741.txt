@@ -1,0 +1,97 @@
+CROWD WISDOM TRADING — CPA Logistics Cost Report
+Generated: 20260416_171741
+
+ MULTI-AGENT PIPELINE ARCHITECTURE
+  Pipeline mode: Hermes Orchestrator (sequential tool-calling)
+  #   Agent                   Responsibility         
+  1   IngestionAgent          Loads PDFs: local / GDrive / Gmail   
+  2   ExtractionAgent         Classifies + extracts 9 fields (LLM) 
+  3   FeedbackAgent           Hermes loop: re-extracts + hints     
+  4   DedupAgent              Deduplication before DB insert       
+  5   CalculatorAgent         Avg cost / route / trend analysis    
+  6   MarketAgent             FBX / Xeneta rates + anomaly detect  
+  7   ReportAgent             Generates TXT + HTML CPA report      
+
+  Documents : 1 processed │ 0 saved │ 1 dupes │ 0 failed
+
+ DOCUMENT CLASSIFICATION (Agent 2 — ExtractionAgent) 
+  Supported types : invoice | bill_of_lading | freight_quote | customs_doc
+  Successfully extracted : 29
+  Skipped (unsupported)  : 3   ← classified as 'unknown'
+  Parse failures         : 0
+
+ SECTION 1: Data Ingestion  
+  Documents processed : 1
+  Saved to DB         : 0
+  Duplicates skipped  : 1
+  Failed/incomplete   : 0
+
+ SECTION 2: Cost Analytics 
+  Total shipments : 6
+  Overall avg cost: $2,878.10
+
+  Avg cost per route:
+    Albuquerque → Unknown                  $  3,772.00
+    Argentina → Buenos Aires               $  2,220.00
+    Graz → Unknown                         $  4,931.00
+    London → Unknown                       $  2,772.00
+    Rio de Janeiro → Unknown               $  1,353.60
+    Unknown → Unknown                      $  2,220.00
+
+  Trend: ⬆ increasing
+    2018-03   $2,467.52
+    2018-04   $4,931.00
+
+ SECTION 3: Market Comparison (Shiply / FBX) 
+  Route                                Your Avg    Market     Diff      %  Source
+  --------------------------------------------------------------------------------
+  Albuquerque → Unknown               $3,772.00 $2,000.00 $+1,772.00 +88.6% (!)  FBX Static (General Avg)
+  Argentina → Buenos Aires            $2,220.00       N/A        N/A    N/A  unavailable
+  Graz → Unknown                      $4,931.00 $2,000.00 $+2,931.00 +146.6% (!)  FBX Static (General Avg)
+  London → Unknown                    $2,772.00 $2,000.00 $ +772.00 +38.6% (!)  FBX Static (General Avg)
+  Rio de Janeiro → Unknown            $1,353.60 $2,000.00 $ -646.40 -32.3%  FBX Static (General Avg)
+  Unknown → Unknown                   $2,220.00 $2,000.00 $ +220.00 +11.0%  FBX Static (General Avg)
+
+ SECTION 4: Anomalies (4 found) 
+
+  [1] [HIGH] OVERPAYING
+      Route  : Albuquerque → Unknown
+      Detail : Paying 88.6% above market on Albuquerque → Unknown. Your avg: $3,772.00 | Market: $2,000.00 | Excess per shipment: $1,772.00
+
+  [2] [HIGH] OVERPAYING
+      Route  : Graz → Unknown
+      Detail : Paying 146.6% above market on Graz → Unknown. Your avg: $4,931.00 | Market: $2,000.00 | Excess per shipment: $2,931.00
+
+  [3] [MEDIUM] OVERPAYING
+      Route  : London → Unknown
+      Detail : Paying 38.6% above market on London → Unknown. Your avg: $2,772.00 | Market: $2,000.00 | Excess per shipment: $772.00
+
+  [4] [LOW] UNDERPAYING
+      Route  : Rio de Janeiro → Unknown
+      Detail : Costs are 32.3% below market on Rio de Janeiro → Unknown — verify data accuracy. Your avg: $1,353.60 | Market: $2,000.00
+
+ HERMES FEEDBACK LOOP (Agent 3 — FeedbackAgent) 
+  Fields recovered via targeted re-extraction : 1
+  Fields still missing after re-extraction    : 28
+  Prompt memory : core/prompt_memory.json (successful hints reused next run)
+    ✔ invoice_10986.pdf — Improved fields: ['shipper']
+    ✘ invoice_10986.pdf — Still missing: ['shipper']
+    ✘ invoice_10986.pdf — Still missing: ['shipper']
+    ✘ invoice_10986.pdf — Still missing: ['shipper']
+
+
+ SECTION 6: Summary (AI)
+
+
+**Executive Summary**
+
+The current shipping cost analysis indicates an overall average cost of $2,878.10, with a concerning upward trend in monthly expenditures. Notably, two routes exhibit significant anomalies: the Albuquerque to Unknown route incurs costs 88.6% above the market average at $3,772.00, while the Graz to Unknown route is even more alarming, with costs 146.6% above market at $4,931.00. These overpayments represent excess costs of $1,772.00 and $2,931.00 per shipment, respectively, which could substantially impact profitability if not addressed.
+
+In the context of market rates, the FBX data indicates a standard shipping cost of $2,000.00 across comparable routes, underscoring the urgency to realign our pricing structure. 
+
+To mitigate these excessive costs, we recommend the following actionable strategies: 
+1. **Negotiate with carriers** to secure more competitive rates, particularly for the high-cost routes identified.
+2. **Implement a robust route optimization strategy** to minimize reliance on high-cost shipping lanes and explore alternative logistics partners.
+3. **Conduct regular audits of shipping costs** to ensure alignment with market rates, facilitating timely adjustments to our logistics strategy.
+
+By executing these recommendations, we can enhance cost efficiency and improve our overall logistics performance.

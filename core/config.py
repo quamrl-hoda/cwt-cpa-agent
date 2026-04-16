@@ -51,3 +51,7 @@ PROMPT_MEMORY  = "core/prompt_memory.json"
 #Anomaly threshold (%)
 # If your cost is X% above market rate → flag as anomaly
 ANOMALY_THRESHOLD_PCT = 20
+
+# Report output format(s)
+# Options: "txt"  |  "html"  |  "txt,html"  (default: txt only)
+REPORT_FORMAT = os.getenv("REPORT_FORMAT", "txt")

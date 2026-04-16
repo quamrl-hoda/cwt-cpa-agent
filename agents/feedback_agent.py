@@ -1,11 +1,3 @@
-"""
-feedback_agent.py — Agent 7 (Hermes Feedback Loop)
-Analyzes extraction failures and missing fields, then:
-  1. Re-runs extraction with an improved prompt
-  2. Saves successful prompt hints to prompt_memory.json
-  3. Returns improved records for any that were previously incomplete
-"""
-
 import json
 import logging
 from pathlib import Path

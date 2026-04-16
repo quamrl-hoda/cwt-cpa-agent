@@ -10,6 +10,8 @@ wheels/
 .venv
 .env
 credentials.json
+.env.example
+outputs/cwt_agent.log
 =======
 # Byte-compiled / optimized / DLL files
 __pycache__/

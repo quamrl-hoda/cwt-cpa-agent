@@ -1,11 +1,3 @@
-"""
-dedup_agent.py — Agent 3
-Prevents duplicate records from being saved to the database.
-Dedup key: shipper + invoice_date + total_cost
-
-Returns a summary of what was saved vs skipped.
-"""
-
 import logging
 from core.db import record_exists, insert_shipment, log_agent
 

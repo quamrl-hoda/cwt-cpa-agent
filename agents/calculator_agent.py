@@ -1,15 +1,3 @@
-"""
-calculator_agent.py — Agent 4
-Calculates shipping cost analytics from all saved shipments.
-
-Metrics:
-  - Average cost per route (origin → destination)
-  - Average cost per container type
-  - Most / cheapest route
-  - Month-over-month trend
-  - Overall average cost
-"""
-
 import logging
 from collections import defaultdict
 from core.db import fetch_all_shipments, log_agent

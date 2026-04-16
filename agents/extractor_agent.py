@@ -1,12 +1,3 @@
-"""
-extractor_agent.py — Agent 2
-Two sub-agents:
-  A) Classifier  — asks LLM what type of document this is
-  B) Extractor   — uses Docling to parse PDF then asks LLM to extract fields
-
-Returns a list of dicts (one per PDF).
-"""
-
 import logging
 import json
 from pathlib import Path
@@ -165,28 +156,52 @@ def _extract(text: str, doc_type: str, path: str) -> dict:
     extra_hint = _load_prompt_hints(doc_type)
 
     prompt = f"""
-You are a CPA assistant specialising in logistics documents.
+You are a CPA assistant specialising in logistics and commercial documents.
 
 Extract the following fields from the {doc_type} document below.
-If a field is not found, use null.
+If a field is not found, use null. Read the ENTIRE document carefully.
 
-Fields to extract:
-- shipper         (company name of sender)
-- consignee       (company name of recipient)
-- origin_port     (city or port where shipment started)
-- destination_port(city or port where shipment ends)
-- container_type  (e.g. 20ft, 40ft, LCL, FCL)
-- weight_kg       (numeric, kilograms)
-- total_cost      (numeric, amount charged)
-- currency        (3-letter code, e.g. USD, EUR)
-- invoice_date    (YYYY-MM-DD format)
+Fields and their common aliases (look for ALL of these):
+
+- shipper         → "From:", "Seller:", "Vendor:", "Supplier:", "Exporter:",
+                    "Consignor:", "Billed From:", "Invoice From:", company name at top
+
+- consignee       → "To:", "Buyer:", "Customer:", "Client:", "Ship To:",
+                    "Bill To:", "Deliver To:", "Importer:", "Consignee:"
+
+- origin_port     → "Port of Loading:", "POL:", "From Port:", "Departure Port:",
+                    "Origin:", "From:", "Shipped From:", "Dispatch From:"
+                    For non-freight invoices: use the sender's city/country.
+
+- destination_port→ "Port of Discharge:", "POD:", "To Port:", "Destination:",
+                    "Ship To (address):", "Delivery Address:", "Deliver To:",
+                    "Bill To (city):", "Final Destination:", "Delivered To:"
+                    For non-freight invoices: extract the recipient's CITY or COUNTRY.
+                    This is the MOST important field — try hard to find it.
+
+- container_type  → "20ft", "40ft", "LCL", "FCL", "TEU", "Container Size:",
+                    "Shipping Method:". Use null if document is not ocean freight.
+
+- weight_kg       → "Weight:", "Gross Weight:", "Net Weight:", "Total Weight:"
+                    Convert lbs to kg if needed (1 lbs = 0.453 kg).
+
+- total_cost      → "Total:", "Total Amount:", "Grand Total:", "Amount Due:",
+                    "Invoice Total:", "Freight Charges:", "Net Amount:",
+                    "Total Due:", "Balance Due:". Return numeric value only.
+
+- currency        → 3-letter ISO code. Look for $=USD, £=GBP, €=EUR, ¥=JPY.
+                    If amount has $ → "USD". If amount has £ → "GBP".
+
+- invoice_date    → "Date:", "Invoice Date:", "Issue Date:", "Dated:"
+                    Format as YYYY-MM-DD.
 
 {extra_hint}
 
-Respond ONLY with a valid JSON object. No explanation, no markdown.
+RESPOND ONLY with a valid JSON object. No explanation, no markdown fences.
+Example: {{"shipper": "ABC Corp", "total_cost": 1250.00, "currency": "USD", ...}}
 
 --- DOCUMENT START ---
-{text[:3000]}
+{text[:4000]}
 --- DOCUMENT END ---
 """.strip()
 
@@ -198,12 +213,72 @@ Respond ONLY with a valid JSON object. No explanation, no markdown.
         val = result.get(field)
         if field in ("total_cost", "weight_kg") and val is not None:
             try:
-                val = float(str(val).replace(",", "").replace("$", "").strip())
+                val = float(str(val).replace(",", "").replace("$", "").replace("£", "").replace("€", "").strip())
             except (ValueError, TypeError):
                 val = None
         cleaned[field] = val
 
+    # Post-process: infer currency from text if LLM missed it
+    if cleaned.get("currency") is None:
+        cleaned["currency"] = _infer_currency(text)
+
+    # Post-process: infer destination_port from consignee address if LLM missed it
+    if cleaned.get("destination_port") is None and cleaned.get("consignee"):
+        inferred_dest = _infer_destination_from_consignee(text, cleaned.get("consignee", ""))
+        if inferred_dest:
+            cleaned["destination_port"] = inferred_dest
+            logger.info("  Inferred destination_port from consignee block: %s", inferred_dest)
+
     return cleaned
+
+
+def _infer_currency(text: str) -> str | None:
+    """Heuristic fallback: detect currency symbol in document text."""
+    snippet = text[:2000]
+    if "£" in snippet or "GBP" in snippet:
+        return "GBP"
+    if "€" in snippet or "EUR" in snippet:
+        return "EUR"
+    if "¥" in snippet or "CNY" in snippet or "JPY" in snippet:
+        return "CNY"
+    if "$" in snippet or "USD" in snippet:
+        return "USD"
+    return None
+
+
+def _infer_destination_from_consignee(text: str, consignee: str) -> str | None:
+    """
+    Targeted fallback: ask the LLM to find destination city/port
+    from the consignee address block when the main extraction returned None.
+    Uses a minimal prompt to keep token cost low.
+    """
+    prompt = f"""
+You are extracting ONE logistics field: the DESTINATION city, port, or country.
+
+The consignee (receiver) is: {consignee}
+
+Look for:
+- Ship To / Deliver To address city
+- Bill To city or country
+- Port of Discharge / POD
+- Consignee address city/country
+
+Document snippet:
+{text[:2000]}
+
+Respond with ONLY the city or port name (e.g. "Rotterdam", "New York", "Singapore").
+If truly not found, respond with exactly: null
+""".strip()
+
+    result = ask_llm(prompt, temperature=0.0, max_tokens=30)
+    cleaned_result = result.strip().strip('"').strip("'").strip()
+    if cleaned_result.lower() in ("null", "none", "n/a", "", "unknown", "not found", "error"):
+        return None
+    if cleaned_result.startswith("ERROR:"):
+        return None
+    if len(cleaned_result) > 80:   # sanity check — not a full sentence
+        return None
+    return cleaned_result
 
 
 # PROMPT MEMORY (written by feedback_agent)

@@ -1,14 +1,3 @@
-"""
-db.py — SQLite database setup and CRUD helpers
-All agents interact with the DB through this module.
-
-Tables:
-  shipments     — extracted logistics records (one per PDF)
-  market_rates  — fetched market rates (Shiply / FBX) per route
-  anomalies     — detected cost anomalies
-  agent_logs    — per-agent run history (for feedback loop)
-"""
-
 import sqlite3
 import logging
 from pathlib import Path
@@ -61,6 +50,20 @@ def init_db():
             fetched_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migration: add rate_source column if the DB was created before it existed
+    try:
+        cursor.execute("ALTER TABLE market_rates ADD COLUMN rate_source TEXT DEFAULT 'unknown'")
+        conn.commit()
+        logger.info("DB migration: added rate_source column to market_rates")
+    except Exception:
+        pass  # column already exists — normal case
+    # Migration: add reference_date column if missing
+    try:
+        cursor.execute("ALTER TABLE market_rates ADD COLUMN reference_date TEXT DEFAULT ''")
+        conn.commit()
+        logger.info("DB migration: added reference_date column to market_rates")
+    except Exception:
+        pass  # column already exists — normal case
 
     #    Anomalies  
     cursor.execute("""
@@ -97,16 +100,30 @@ def init_db():
 # Shipments helpers
 
 def record_exists(shipper: str, invoice_date: str, total_cost: float) -> bool:
-    """Return True if a near-duplicate record already exists."""
+    """
+    Return True if a near-duplicate record already exists.
+
+    Dedup key: (normalised_shipper, invoice_date, total_cost)
+    Normalisation: None / blank shipper → treat as empty string so that
+    the same invoice doesn't slip through when shipper extraction was
+    inconsistent across retries.
+    Also checks with NULL shipper explicitly to catch rows inserted before
+    this normalisation was in place.
+    """
+    # Normalise: treat None / whitespace-only as empty string
+    normalised = (shipper or "").strip()
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
         SELECT id FROM shipments
-        WHERE shipper = ? AND invoice_date = ? AND total_cost = ?
+        WHERE (shipper = ? OR (shipper IS NULL AND ? = '') OR (shipper = '' AND ? = ''))
+          AND invoice_date = ?
+          AND total_cost = ?
         LIMIT 1
         """,
-        (shipper, invoice_date, total_cost),
+        (normalised, normalised, normalised, invoice_date, total_cost),
     )
     exists = cursor.fetchone() is not None
     conn.close()

@@ -1,21 +1,3 @@
-"""
-freight_agent.py — Agent 5
-===========================
-Fetches current ocean freight market rates and compares them against
-your actual shipment costs (from Agent 4 / calculator_agent).
-
-Rate sources (in order of priority):
-  1. Shiply.com marketplace  — via Apify actor
-                               parseforge/shiply-com-freight-marketplace-scraper
-  2. Freightos Baltic Index  — free public FBX API (route mapped to FBX code)
-  3. Static FBX fallback     — last-known reference rates per major corridor
-
-Anomaly detection:
-  - OVERPAYING  : your avg > market by ANOMALY_THRESHOLD_PCT  (default 20%)
-  - UNDERPAYING : your avg < market by > 30% (possible data quality issue)
-  - SURGE       : market rate rose > 25% vs your last invoice date
-"""
-
 import logging
 import requests
 from datetime import datetime, timedelta
@@ -119,7 +101,23 @@ def run(calc_results: dict) -> dict:
             or dest_city.lower() in ("unknown", "")
         )
         if skip_unknowns:
-            comparisons.append(_no_rate_entry(route, your_avg, "Origin/destination unknown"))
+            # Use FBX General benchmark for routes where port extraction failed
+            # ref_date computed here since the normal definition is below this block
+            ref_date = route_dates.get(route, {}).get("latest") or _today_iso()
+            general_rate = _FBX_STATIC_FALLBACK["FBX_GENERAL"]
+            logger.info(
+                "   Route: %s | unknown port(s) -> benchmarking vs FBX General Avg ($%.2f)",
+                route, general_rate,
+            )
+            insert_market_rate("unknown", "unknown", general_rate, "FBX Static (General Avg)", ref_date)
+            fbx_rates[route] = general_rate
+            comp = _build_comparison(route, your_avg, general_rate, "FBX Static (General Avg)", "FBX_GENERAL")
+            comparisons.append(comp)
+            new_anomalies = _detect_anomalies(comp, route_dates.get(route, {}))
+            for a in new_anomalies:
+                anomalies.append(a)
+                insert_anomaly(a)
+                logger.warning("   [ANOMALY] %s: %s", a["type"], a["message"])
             continue
 
         # Get the reference date from actual shipments on this route
@@ -169,7 +167,7 @@ def run(calc_results: dict) -> dict:
     }
 
 
-# RATE FETCHING — 3-level waterfall
+# RATE FETCHING — 5-level waterfall
 
 def _get_market_rate(
     origin: str,
@@ -177,29 +175,43 @@ def _get_market_rate(
     ref_date: str,
 ) -> tuple[float | None, str]:
     """
-    Try Shiply → FBX API → FBX static.
+    Try Shiply → FBX Web Scraper → Xeneta Web Scraper → FBX API → FBX Static.
     Returns (rate_usd, source_label).
     """
     cache_key = f"{origin}|{dest}|{ref_date}"
     if cache_key in _rate_cache:
         return _rate_cache[cache_key], "cache"
 
-    #  Level 1: Shiply via Apify 
+    fbx_code = _match_fbx_code(origin, dest)
+
+    #  Level 1: Shiply via Apify (requires paid plan — skipped if no token) 
     if APIFY_TOKEN:
         rate = _fetch_shiply(origin, dest)
         if rate:
             _rate_cache[cache_key] = rate
             return rate, "Shiply (Apify)"
 
-    #  Level 2: Freightos Baltic Index public API 
-    fbx_code = _match_fbx_code(origin, dest)
+    #  Level 2: Freightos Baltic Index — live web scraper (free) 
+    if fbx_code:
+        rate = _fetch_fbx_web(fbx_code)
+        if rate:
+            _rate_cache[cache_key] = rate
+            return rate, f"FBX Web ({fbx_code})"
+
+    #  Level 3: Xeneta — live web scraper (free, container-specific) 
+    rate = _fetch_xeneta_web(origin, dest)
+    if rate:
+        _rate_cache[cache_key] = rate
+        return rate, "Xeneta Web"
+
+    #  Level 4: Freightos Baltic Index — REST API 
     if fbx_code:
         rate = _fetch_fbx_api(fbx_code, ref_date)
         if rate:
             _rate_cache[cache_key] = rate
             return rate, f"FBX API ({fbx_code})"
 
-    #  Level 3: Static FBX fallback 
+    #  Level 5: Static FBX fallback 
     if fbx_code and fbx_code in _FBX_STATIC_FALLBACK:
         rate = _FBX_STATIC_FALLBACK[fbx_code]
         logger.info("   Using static FBX fallback for %s: $%s", fbx_code, rate)
@@ -255,11 +267,89 @@ def _fetch_shiply(origin: str, dest: str) -> float | None:
         return None
 
 
+# LIVE CURRENCY CONVERSION (free API — no key required)
+
+# Hardcoded fallback rates → USD (updated periodically as a safety net)
+_FX_FALLBACK: dict[str, float] = {
+    "GBP": 1.27,
+    "EUR": 1.09,
+    "CNY": 0.138,
+    "JPY": 0.0066,
+    "SGD": 0.74,
+    "AED": 0.272,
+    "INR": 0.012,
+    "KRW": 0.00073,
+    "AUD": 0.65,
+    "CAD": 0.74,
+    "CHF": 1.11,
+    "USD": 1.0,
+}
+
+# Session-level FX cache — fetched once per run
+_fx_cache: dict[str, float] = {}
+
+
+def _fetch_fx_rates() -> dict[str, float]:
+    """
+    Fetch live USD exchange rates from the free open.er-api.com endpoint.
+    No API key required. Returns rates as {currency_code: rate_vs_usd}.
+    Falls back to _FX_FALLBACK on any failure.
+    """
+    global _fx_cache
+    if _fx_cache:
+        return _fx_cache
+
+    try:
+        resp = requests.get(
+            "https://open.er-api.com/v6/latest/USD",
+            timeout=8,
+            headers={"User-Agent": "cwt-cpa-agent/1.0"},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            rates_vs_usd = data.get("rates", {})
+            if rates_vs_usd:
+                # Convert to: 1 foreign_currency = X USD
+                _fx_cache = {
+                    code: round(1.0 / rate, 6)
+                    for code, rate in rates_vs_usd.items()
+                    if rate and rate > 0
+                }
+                _fx_cache["USD"] = 1.0
+                logger.info(
+                    "   [FX] Live rates fetched — %d currencies (source: open.er-api.com)",
+                    len(_fx_cache),
+                )
+                return _fx_cache
+    except Exception as e:
+        logger.debug("   [FX] Live rate fetch failed: %s — using fallback", e)
+
+    logger.info("   [FX] Using hardcoded fallback FX rates")
+    _fx_cache = dict(_FX_FALLBACK)
+    return _fx_cache
+
+
+def _to_usd(amount: float, currency: str) -> float:
+    """
+    Convert an amount in the given currency to USD using live rates.
+    Returns the original amount unchanged if currency is USD or unknown.
+    """
+    code = currency.upper().strip()
+    if code in ("", "USD"):
+        return amount
+    rates = _fetch_fx_rates()
+    factor = rates.get(code) or _FX_FALLBACK.get(code)
+    if factor:
+        return round(amount * factor, 2)
+    logger.debug("   [FX] Unknown currency '%s' — treating as USD", code)
+    return amount
+
+
 def _parse_shiply_items(items: list[dict]) -> float | None:
     """
     Extract a median market rate from Shiply quote results.
     Shiply typically returns: { "price": 1200, "currency": "GBP", "description": ... }
-    We take the median of all numeric prices (converted to USD).
+    We take the median of all numeric prices (converted to USD via live FX rates).
     """
     prices = []
     for item in items:
@@ -268,12 +358,10 @@ def _parse_shiply_items(items: list[dict]) -> float | None:
         if raw is None:
             continue
         try:
-            price_usd = float(str(raw).replace(",", "").replace("$", "").replace("£", "").strip())
-            # Rough currency conversion (GBP→USD, EUR→USD)
-            if currency == "GBP":
-                price_usd *= 1.27
-            elif currency == "EUR":
-                price_usd *= 1.09
+            price_local = float(
+                str(raw).replace(",", "").replace("$", "").replace("£", "").strip()
+            )
+            price_usd = _to_usd(price_local, currency)
             prices.append(price_usd)
         except (ValueError, TypeError):
             continue
@@ -287,12 +375,168 @@ def _parse_shiply_items(items: list[dict]) -> float | None:
     return round(median_price, 2)
 
 
-# LEVEL 2 — Freightos Baltic Index (FBX) public API
+# LEVEL 2 — Freightos Baltic Index (FBX) live web scraper
+
+_FBX_WEB_URL = "https://fbx.freightos.com/fbx/"
+
+def _fetch_fbx_web(fbx_code: str) -> float | None:
+    """
+    Scrape the Freightos Baltic Index public dashboard to get the latest
+    rate for a given FBX corridor code (e.g. FBX01, FBX03).
+
+    The page renders rate data in JSON embedded as <script type="application/json">
+    tags or in data attributes. We scan for numeric values adjacent to
+    the fbx_code string.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        import re
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        resp = requests.get(_FBX_WEB_URL, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            logger.debug("   [FBX Web] HTTP %d — skipping.", resp.status_code)
+            return None
+
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # Strategy 1: Look for JSON blobs in <script> tags
+        for script in soup.find_all("script"):
+            text = script.string or ""
+            if fbx_code in text:
+                # Find numbers near the FBX code (e.g. "FBX01":2150 or "value":2150)
+                numbers = re.findall(
+                    rf'{re.escape(fbx_code)}[^\d]{{0,30}}(\d{{3,6}}(?:\.\d{{1,2}})?)',
+                    text
+                )
+                if numbers:
+                    values = [float(n) for n in numbers if 100 < float(n) < 30000]
+                    if values:
+                        rate = round(sum(values) / len(values), 2)
+                        logger.info("   [FBX Web] %s: $%.2f (script tag)", fbx_code, rate)
+                        return rate
+
+        # Strategy 2: Look for data-* attributes or visible text patterns
+        page_text = soup.get_text(" ")
+        numbers = re.findall(
+            rf'{re.escape(fbx_code)}[^\d]{{0,50}}(\d{{3,6}}(?:\.\d{{1,2}})?)',
+            page_text
+        )
+        if numbers:
+            values = [float(n) for n in numbers if 100 < float(n) < 30000]
+            if values:
+                rate = round(sum(values) / len(values), 2)
+                logger.info("   [FBX Web] %s: $%.2f (page text)", fbx_code, rate)
+                return rate
+
+        logger.debug("   [FBX Web] Could not find %s rate in page.", fbx_code)
+        return None
+
+    except ImportError:
+        logger.warning("   [FBX Web] beautifulsoup4 not installed. Run: pip install beautifulsoup4 lxml")
+        return None
+    except Exception as e:
+        logger.debug("   [FBX Web] Scrape failed: %s", e)
+        return None
+
+
+# LEVEL 3 — Xeneta public container rate index web scraper
+
+_XENETA_URL = "https://www.xeneta.com/ocean-freight-rate-indices"
+
+def _fetch_xeneta_web(origin: str, dest: str) -> float | None:
+    """
+    Scrape Xeneta's public ocean freight rate indices page.
+    Xeneta publishes aggregate container spot rate indices for major trade lanes.
+
+    This is a best-effort scraper — Xeneta's full data requires a subscription,
+    but headline index values are shown publicly on their indices page.
+    """
+    try:
+        from bs4 import BeautifulSoup
+        import re
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        resp = requests.get(_XENETA_URL, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            logger.debug("   [Xeneta] HTTP %d — skipping.", resp.status_code)
+            return None
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        page_text = soup.get_text(" ")
+
+        # Xeneta labels lanes like "Far East to North Europe" or "Transpacific"
+        o = origin.lower()
+        d = dest.lower()
+
+        # Build keyword sets for origin and destination
+        china_terms   = ("china", "shanghai", "shenzhen", "guangzhou", "ningbo", "qingdao", "far east")
+        europe_terms  = ("europe", "rotterdam", "hamburg", "antwerp", "north europe")
+        us_terms      = ("us", "usa", "united states", "america", "transpacific")
+
+        from_china  = any(t in o for t in china_terms)
+        to_europe   = any(t in d for t in europe_terms)
+        to_us       = any(t in d for t in us_terms)
+        from_europe = any(t in o for t in europe_terms)
+
+        # Map to Xeneta lane keywords to search in the page text
+        if from_china and to_europe:
+            lane_keywords = ["far east", "north europe", "europe"]
+        elif from_china and to_us:
+            lane_keywords = ["transpacific", "far east", "us"]
+        elif from_europe and to_us:
+            lane_keywords = ["transatlantic", "europe", "us"]
+        else:
+            lane_keywords = [origin.split()[0].lower(), dest.split()[0].lower()]
+
+        # Look for dollar amounts near the lane keyword
+        for keyword in lane_keywords:
+            idx = page_text.lower().find(keyword)
+            if idx == -1:
+                continue
+            # Extract numbers in a ±300 char window around the keyword
+            window = page_text[max(0, idx - 50): idx + 300]
+            numbers = re.findall(r'\$?([1-9]\d{2,5}(?:\.\d{1,2})?)', window)
+            valid = [float(n) for n in numbers if 100 < float(n) < 30000]
+            if valid:
+                rate = round(sum(valid) / len(valid), 2)
+                logger.info("   [Xeneta] %s→%s via '%s': $%.2f", origin, dest, keyword, rate)
+                return rate
+
+        logger.debug("   [Xeneta] No matching rate found for %s → %s", origin, dest)
+        return None
+
+    except ImportError:
+        logger.warning("   [Xeneta] beautifulsoup4 not installed. Run: pip install beautifulsoup4 lxml")
+        return None
+    except Exception as e:
+        logger.debug("   [Xeneta] Scrape failed: %s", e)
+        return None
+
+
+# LEVEL 4 — Freightos Baltic Index (FBX) public REST API
 
 def _fetch_fbx_api(fbx_code: str, ref_date: str) -> float | None:
     """
     Fetch FBX index value for the given code on or near ref_date.
     Tries the Freightos public series API endpoint.
+    Note: This often returns 403 — FBX Web scraper is tried first.
     """
     try:
         # Parse date and compute a ±7 day window around the reference date
@@ -327,7 +571,7 @@ def _fetch_fbx_api(fbx_code: str, ref_date: str) -> float | None:
                     return round(avg, 2)
 
         elif resp.status_code == 403:
-            logger.debug("   [FBX API] Access denied for %s — using static fallback.", fbx_code)
+            logger.debug("   [FBX API] Access denied for %s — falling through to static.", fbx_code)
 
     except Exception as e:
         logger.debug("   [FBX API] Request failed: %s", e)

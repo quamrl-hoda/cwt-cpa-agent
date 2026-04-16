@@ -1,22 +1,3 @@
-"""
-loader_agent.py — Agent 1
-=========================
-Loads PDF files from:
-
-  - local folder  (source="local")
-  - Google Drive  (source="gdrive")
-  - Gmail         (source="gmail")
-
-Returns a list of local file paths ready for Agent 2 (extractor_agent).
-
-Configuration (via .env):
-  GDRIVE_FOLDER_ID        GDrive folder ID to scan (required for gdrive)
-  GOOGLE_CREDENTIALS_FILE Path to OAuth2 credentials JSON (default: credentials.json)
-  GMAIL_SEARCH_QUERY      Gmail search string (default: subject:(invoice OR freight) has:attachment)
-  GMAIL_MAX_RESULTS       Max emails to scan   (default: 30)
-  GDRIVE_RECURSIVE        Set to "true" to scan sub-folders (default: true)
-"""
-
 import base64
 import io
 import logging

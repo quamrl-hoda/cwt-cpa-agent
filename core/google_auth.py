@@ -1,23 +1,3 @@
-"""
-core/google_auth.py — Shared Google OAuth2 helper
-=================================================
-Provides authenticated Google API service objects for both
-Google Drive and Gmail using OAuth2 with token caching.
-
-Scopes are chosen per-service so tokens stay minimal:
-  - Drive  → drive.readonly
-  - Gmail  → gmail.readonly
-
-Token files are stored in the project root:
-  - token_drive.json
-  - token_gmail.json
-
-Usage:
-    from core.google_auth import get_drive_service, get_gmail_service
-    drive   = get_drive_service()
-    gmail   = get_gmail_service()
-"""
-
 import logging
 from pathlib import Path
 from typing import Optional
