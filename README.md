@@ -156,8 +156,7 @@ python main.py --legacy
 
 ```
 
-          CROWD WISDOM TRADING — CPA Logistics Cost Report        
-          Generated: 20250415_143022                              
+ CROWD WISDOM TRADING — CPA Logistics Cost Report        
 
 
  SECTION 1: Data Ingestion Summary 
