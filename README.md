@@ -26,7 +26,7 @@ PDF Files (local / GDrive / Gmail)
          ▼ Tool 2
 ┌─────────────────────┐
 │  Agent 2: Extractor │  Docling → parse PDF text
-│  (Classify + Extract│  LLM → classify type + extract 9 fields
+│ (Classify + Extract)│  LLM → classify type + extract 9 fields
 └────────┬────────────┘
          ▼ Tool 3
 ┌─────────────────────┐
@@ -58,7 +58,6 @@ PDF Files (local / GDrive / Gmail)
          │
          ▼
   outputs/cwt_cpa_report_YYYYMMDD_HHMMSS.txt
-  outputs/cwt_cpa_report_YYYYMMDD_HHMMSS.html   ← open in browser
 ```
 
 
